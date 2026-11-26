@@ -1,372 +1,1050 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
+  /* Smart Glasses — visual language taken from accessible wayfinding:
+     tactile-paving yellow on asphalt, Atkinson Hyperlegible (Braille Institute),
+     a braille cell as the mark. Yellow is used in ONE place: the spoken answer. */
+  @font-face { font-family: "Atkinson Hyperlegible"; src: url("/static/fonts/AtkinsonHyperlegible-Regular.ttf"); font-weight: 400; }
+  @font-face { font-family: "Atkinson Hyperlegible"; src: url("/static/fonts/AtkinsonHyperlegible-Bold.ttf"); font-weight: 700; }
+  @font-face { font-family: "Plex Arabic"; src: url("/static/fonts/IBMPlexSansArabic-Regular.ttf"); font-weight: 400; }
+  @font-face { font-family: "Plex Arabic"; src: url("/static/fonts/IBMPlexSansArabic-SemiBold.ttf"); font-weight: 600 700; }
+  :root {
+    --asphalt: #24272c;
+    --asphalt-2: #2d3137;
+    --line: #3d424a;
+    --paper: #f3f3ee;
+    --muted: #a9aeb5;
+    --tactile: #f2c200;
+    --ink: #17181a;
+    --people: #a9c1ff;
+    --maybe: #ffcf70;
+    --signal: #ff6a3d;
+    --go: #46d483;
+    --accent: var(--tactile);
+    --face: var(--people);
+    --ok: var(--go);
+    --danger: var(--signal);
+    --text: var(--paper);
+    --panel: var(--asphalt-2);
+    --panel-2: #363b42;
+    --bg: var(--asphalt);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
   body {
-    background: url('/static/images/images.jpeg') no-repeat center center fixed;
-    background-size: cover;
-    font-family: 'Segoe UI', sans-serif;
+    background: var(--asphalt); color: var(--paper);
+    font-family: "Atkinson Hyperlegible", "Plex Arabic", "Segoe UI", system-ui, sans-serif;
+    font-size: 16px; line-height: 1.45; -webkit-font-smoothing: antialiased;
   }
+  [dir="rtl"], :lang(ar) { font-family: "Plex Arabic", "Atkinson Hyperlegible", "Segoe UI", sans-serif; }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 3px solid var(--tactile); outline-offset: 2px; }
+  .hidden { display: none !important; }
 
-  .main-container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 30px;
-    color: white;
-  }
+  /* ---------- Header ---------- */
+  .app-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 32px; }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .brand-mark { width: 34px; height: 44px; flex: none; }
+  .brand h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: -.01em; }
+  .brand p { margin: 0; color: var(--muted); font-size: 14px; }
+  .header-actions { display: flex; align-items: center; gap: 10px; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 8px; color: var(--muted); font-size: 14px; background: var(--asphalt-2); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.live { background: var(--go); }
+  .camera-select { background: var(--asphalt-2); border: 0; border-radius: 8px; padding: 8px 10px; max-width: 230px; }
+  .segmented { display: inline-flex; background: var(--asphalt-2); border-radius: 8px; padding: 3px; }
+  .segmented button { border: 0; background: transparent; padding: 6px 14px; border-radius: 6px; color: var(--muted); font-weight: 700; }
+  .segmented button[aria-pressed="true"] { background: var(--paper); color: var(--ink); }
 
-  .top-bar {
-    display: flex;
-    justify-content: space-between;
-    width: 90%;
-    margin-bottom: 20px;
-    align-items: center;
-  }
+  /* ---------- Layout ---------- */
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 32px; padding: 4px 32px 32px; max-width: 1480px; margin: 0 auto; align-items: start; }
 
-  .creator-box, .title-box, .image-area-box {
-    background: rgba(255, 255, 255, 0.9);
-    color: black;
-    padding: 10px 20px;
-    border-radius: 20px;
-    font-weight: bold;
-  }
+  /* ---------- The lens (camera) ---------- */
+  .viewport { position: relative; background: #000; border-radius: 22px; overflow: hidden; aspect-ratio: 16 / 9; max-height: calc(100vh - 230px); width: 100%; }
+  .viewport video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .vp-top { position: absolute; top: 16px; left: 16px; right: 16px; display: flex; pointer-events: none; }
+  .chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 8px; background: rgba(23,24,26,.78); font-size: 14px; font-weight: 700; }
+  .chip .dot { background: var(--tactile); }
+  .chip.guide .dot { background: var(--go); animation: blink 1.2s ease-in-out infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  .steps { display: inline-flex; gap: 5px; margin-left: 4px; }
+  .steps i { width: 8px; height: 8px; border-radius: 50%; background: #5a6069; }
+  .steps i.done { background: var(--people); }
+  .scan-line { position: absolute; left: 0; right: 0; height: 2px; background: var(--tactile); top: 0; opacity: 0; }
+  .busy .scan-line { opacity: .8; animation: scan 1.4s ease-in-out infinite; }
+  @keyframes scan { 0% { top: 8%; } 50% { top: 80%; } 100% { top: 8%; } }
+  .viewport.flash::after { content: ""; position: absolute; inset: 0; background: #fff; opacity: 0; animation: flash .35s ease-out; pointer-events: none; }
+  @keyframes flash { 0% { opacity: .55; } 100% { opacity: 0; } }
 
-  .webcam-section {
-    display: flex;
-    flex-direction: row;
-    gap: 40px;
-    margin-top: 20px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 20px;
-    padding: 20px;
-    backdrop-filter: blur(5px);
-  }
+  /* The spoken answer: the one bold element. Signage yellow, very large type. */
+  .caption { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 16px; padding: 18px 24px; background: var(--tactile); color: var(--ink); min-height: 78px; }
+  .caption-text { flex: 1; font-size: 27px; line-height: 1.25; font-weight: 700; max-width: 62ch; }
+  .caption-text.placeholder { font-weight: 400; font-size: 19px; color: #4a3f00; }
+  .caption-text.enter { animation: settle .3s cubic-bezier(.2,.8,.2,1); }
+  @keyframes settle { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .caption.urgent { background: var(--signal); color: #fff; }
+  .caption.urgent .caption-text { color: #fff; }
+  .speak-btn { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--ink); background: transparent; color: var(--ink); display: grid; place-items: center; }
+  .caption.urgent .speak-btn { border-color: #fff; color: #fff; }
+  .spinner { width: 22px; height: 22px; border-radius: 50%; border: 3px solid rgba(23,24,26,.25); border-top-color: var(--ink); animation: spin .8s linear infinite; flex: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-  #video {
-    width: 320px;
-    height: auto;
-    border-radius: 15px;
-    background-color: #ccc;
-  }
+  /* ---------- Voice bar ---------- */
+  .voice-bar { margin-top: 18px; display: flex; align-items: center; gap: 18px; }
+  .distance-bar { margin-top: 14px; display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap; color: var(--muted); font-size: 14px; }
+  .distance-bar .step { display: inline-flex; align-items: center; gap: 8px; }
+  .distance-bar input { width: 64px; background: var(--asphalt-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; color: var(--paper); font: inherit; }
+  .distance-bar .hint { font-size: 13px; }
+  .mic { width: 64px; height: 64px; border-radius: 50%; border: 0; flex: none; display: grid; place-items: center; background: var(--paper); color: var(--ink); position: relative; }
+  .mic.listening::after { content: ""; position: absolute; inset: -7px; border-radius: 50%; border: 3px solid var(--tactile); animation: pulse 1.2s ease-out infinite; }
+  @keyframes pulse { from { transform: scale(.92); opacity: 1; } to { transform: scale(1.22); opacity: 0; } }
+  .voice-text { min-width: 0; }
+  .voice-text strong { display: block; font-size: 18px; }
+  .voice-text > span { color: var(--muted); font-size: 15px; }
+  .kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 0 6px; font-size: 13px; color: var(--muted); margin-left: 4px; }
+  .switch { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; color: var(--muted); font-size: 15px; white-space: nowrap; }
+  .switch button { width: 46px; height: 26px; border-radius: 999px; border: 0; background: #4a5059; position: relative; padding: 0; }
+  .switch button::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: left .15s; }
+  .switch button[aria-checked="true"] { background: var(--go); }
+  .switch button[aria-checked="true"]::after { left: 23px; }
 
-  #result-textbox {
-    margin-top: 10px;
-    width: 100%;
-    padding: 10px;
-    border-radius: 10px;
-    font-size: 1.1em;
-    white-space: normal;
-    word-wrap: break-word;
-  }
+  /* ---------- Controls column: sections, not boxes ---------- */
+  .side { display: flex; flex-direction: column; }
+  .side .card { padding: 20px 0; border-top: 1px solid var(--line); }
+  .side .card:first-child { border-top: 0; padding-top: 0; }
+  .card h2 { font-size: 17px; font-weight: 700; margin: 0 0 12px; color: var(--paper); }
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .mode { text-align: left; background: transparent; border: 0; border-radius: 10px; padding: 9px 10px; display: grid; grid-template-columns: 34px 1fr; column-gap: 10px; align-items: center; position: relative; }
+  .mode .ico { grid-row: span 2; width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--asphalt-2); color: var(--paper); }
+  .mode b { font-size: 16px; font-weight: 700; line-height: 1.2; }
+  .mode small { color: var(--muted); font-size: 13.5px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mode > b, .mode > small { min-width: 0; }
+  .mode:hover { background: var(--asphalt-2); }
+  .mode[aria-pressed="true"] { background: var(--asphalt-2); }
+  .mode[aria-pressed="true"] .ico { background: var(--tactile); color: var(--ink); }
+  .mode.face[aria-pressed="true"] .ico { background: var(--people); color: var(--ink); }
+  .field { display: flex; gap: 8px; margin-top: 12px; }
+  .field input { flex: 1; min-width: 0; background: var(--asphalt-2); border: 1px solid transparent; border-radius: 10px; padding: 11px 12px; }
+  .field input::placeholder { color: #8b9098; }
+  .field input:focus { border-color: var(--line); }
+  #object_to_be_found_container { display: none; }
+  .btn { border: 0; border-radius: 10px; padding: 11px 14px; font-weight: 700; }
+  .btn-face { background: var(--people); color: var(--ink); }
+  .btn-ghost { background: var(--asphalt-2); color: var(--paper); }
+  .btn-ghost.danger { color: #ffb19a; }
+  .people-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .people-actions .btn { flex: 1; }
 
-  .btn-style {
-    padding: 12px;
-    margin-top: 10px;
-    border-radius: 15px;
-    background-color: #f2f2f2;
-    border: none;
-    font-size: 1em;
-    cursor: pointer;
-  }
-  .btn-start {
-    padding: 12px;
-    margin-top: 10px;
-    border-radius: 15px;
-    background-color: #00098a;
-    color: #FFFFFF;
-    border: none;
-    font-size: 1em;
-    cursor: pointer;
-    width: 100%;
-  }
+  /* Guide mode: the one control that runs on its own */
+  .guide-card { display: flex; align-items: center; gap: 14px; }
+  .guide-toggle { flex: none; width: 56px; height: 56px; border-radius: 14px; border: 2px solid var(--line); background: transparent; color: var(--go); display: grid; place-items: center; position: relative; }
+  .guide-toggle[aria-pressed="true"] { background: var(--go); border-color: var(--go); color: var(--ink); }
+  .guide-toggle[aria-pressed="true"]::after { content: ""; position: absolute; inset: -6px; border-radius: 18px; border: 2px solid var(--go); animation: radar 2s ease-out infinite; }
+  @keyframes radar { from { transform: scale(1); opacity: .7; } to { transform: scale(1.35); opacity: 0; } }
+  .guide-text b { display: block; font-size: 17px; }
+  .guide-text span { display: block; color: var(--muted); font-size: 14px; line-height: 1.4; max-width: 34ch; }
+  .guide-on .guide-text b { color: var(--go); }
 
-  select, .btn-style, input {
-    width: 100%;
-  }
+  /* History */
+  .history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; max-height: 210px; overflow: auto; }
+  .history li { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; font-size: 14.5px; line-height: 1.35; }
+  .history time { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .history .tag { display: none; }
+  .history .msg { grid-column: 2; }
+  .empty { color: var(--muted); font-size: 14.5px; }
 
-  .form-group {
-    margin-top: 15px;
-  }
+  /* Start screen */
+  .start-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; text-align: center; background: var(--asphalt); cursor: pointer; padding: 24px; }
+  .start-overlay .ring { width: 120px; height: 120px; border-radius: 50%; margin: 0 auto 28px; display: grid; place-items: center; background: var(--tactile); color: var(--ink); position: relative; }
+  .start-overlay .ring::after { content: ""; position: absolute; inset: -10px; border-radius: 50%; border: 3px solid var(--tactile); animation: pulse 1.6s ease-out infinite; }
+  .start-overlay h2 { font-size: 40px; margin: 0 0 10px; letter-spacing: -.01em; }
+  .start-overlay p { color: var(--muted); margin: 0 auto; font-size: 18px; max-width: 40ch; }
 
-  .controls-section {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    width: 100%;
+  @media (max-width: 1000px) {
+    .layout { grid-template-columns: 1fr; padding: 4px 16px 24px; gap: 20px; }
+    .app-header { padding: 14px 16px; flex-wrap: wrap; }
+    .caption-text { font-size: 21px; }
+    .viewport { max-height: none; }
   }
-
-  .image-preview img {
-    max-width: 100%;
-    border-radius: 15px;
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
   }
 </style>
-<div class="main-container">
 
-  <div class="webcam-section">
-    <div>
-      <video id="video" autoplay muted></video>
-      <canvas id="canvas" style="display:none;"></canvas>
-      <div class="form-group" style="margin-top: 20px;"></div>
-      <div class="form-group" style="margin-top: 20px;">
-        <label>You said :</label>
-        <input type="text" id="result-textbox" readonly>
-      </div>
-      <div id="image-container" class="image-preview" style="display:none;">
-        <img id="uploaded-image" alt="Processed Image">
-      </div>
-    </div>
-
-    <div class="controls-section">
-      <!-- Hidden input for object to be found -->
-      <div id="object_to_be_found_container" style="display:none;">
-        <label for="object_to_be_found">Object to Find:</label>
-        <input type="text" id="object_to_be_found">
-      </div>
-      
-      <!-- Hidden input for select mode -->
-      <input type="hidden" id="select_mode" value="">
-      <!-- Feedback for voice recognition -->
-      <div id="voice-feedback"></div>
-      <div class="form-group">
-        <label>Detection Language</label>
-        <select id="language-selector" class="btn-style" onchange="setRecognitionLanguage()">
-          <option value="en-US">English</option>
-          <option value="ar-SA">Arabic</option>
-        </select>
-      </div>
-
-      <div class="form-group">
-        <button class="btn-start" onclick="startVoiceRecognition()">Start Voice Recognition</button>
-      </div>
-
-      <!-- New Read-Only Field -->
-      <div class="form-group" style="display: flex; flex-direction: column; justify-content: flex-end; height: 100%; width: 100%;">
-        <label style="font-size: 1em; margin-bottom: 5px;">Detection Result :</label>
-        <textarea id="read-only-field" readonly style="flex-grow: 1; height: auto; border-radius: 15px; padding: 10px; text-align: left; width: 100%; box-sizing: border-box; overflow-y: auto; word-wrap: break-word; white-space: pre-wrap; font-size: 1em; resize: none;"></textarea>
-      </div>
-    </div>
-  </div>
-  <div style="display: flex; align-items: center;">
-    <!--<img src="/static/images/IMG_3494_1.png" alt="creator" style="height: 40px; width: 40px; border-radius: 50%; margin-right: 10px;">
-    <span>Created by <strong>Eng. Ahmed Yasser</strong></span> -->
+<div class="start-overlay" id="start-overlay" role="button" tabindex="0" aria-label="Start smart glasses">
+  <div>
+    <div class="ring"><svg width="54" height="54" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="14" r="4"/><circle cx="18" cy="14" r="4"/><path d="M10 14h4M2 14l1-6M22 14l-1-6"/></svg></div>
+    <h2>Put on the glasses</h2>
+    <p>Tap anywhere or press any key. After that, everything works by voice.</p>
   </div>
 </div>
-<script>
-let recognition;
 
-// Initialize voice recognition
+<header class="app-header">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 34 44" aria-hidden="true">
+      <rect width="34" height="44" rx="8" fill="#f2c200"/>
+      <circle cx="11" cy="11" r="4.2" fill="#17181a"/><circle cx="23" cy="11" r="4.2" fill="#17181a"/>
+      <circle cx="11" cy="22" r="4.2" fill="#17181a"/><circle cx="23" cy="22" r="4.2" fill="#17181a"/>
+      <circle cx="11" cy="33" r="2" fill="#17181a" opacity=".25"/><circle cx="23" cy="33" r="2" fill="#17181a" opacity=".25"/>
+    </svg>
+    <div>
+      <h1>Ru'ya <span lang="ar" style="font-weight:600">رؤية</span></h1>
+      <p>Assistive vision for visually impaired people</p>
+    </div>
+  </div>
+  <div class="header-actions">
+    <span class="pill" id="cam-pill" title="Click to retry the camera"><span class="dot" id="cam-dot"></span><span id="cam-status">Starting camera…</span></span>
+    <select id="camera-select" class="camera-select hidden" aria-label="Camera"></select>
+    <div class="segmented" role="group" aria-label="Language">
+      <button type="button" data-lang="en-US" aria-pressed="true">EN</button>
+      <button type="button" data-lang="ar-SA" aria-pressed="false">عربي</button>
+    </div>
+    <select id="language-selector" class="hidden" aria-hidden="true">
+      <option value="en-US">English</option>
+      <option value="ar-SA">Arabic</option>
+    </select>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- ---------- Camera ---------- -->
+  <section>
+    <div class="viewport" id="viewport">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="overlay" aria-hidden="true"></canvas>
+      <canvas id="canvas" class="hidden"></canvas>
+      <div class="scan-line"></div>
+      <div class="vp-top">
+        <span class="chip" id="chip"><span class="dot"></span><span id="mode-chip">Choose a mode or speak</span><span class="steps hidden" id="steps"><i></i><i></i><i></i></span></span>
+      </div>
+      <div class="caption" id="caption-box" aria-live="polite">
+        <div class="spinner hidden" id="spinner"></div>
+        <div class="caption-text placeholder" id="caption">Results appear here and are read aloud.</div>
+        <button type="button" class="speak-btn" id="repeat-btn" title="Read again" aria-label="Read the result again">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="voice-bar">
+      <button type="button" class="mic" id="mic-btn" aria-label="Start voice command">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+      </button>
+      <div class="voice-text">
+        <strong id="voice-feedback">Tap the mic and say a command</strong>
+        <span>Try “who”, “find my keys”, “guide” or “help”. Press <span class="kbd">Space</span> to talk.</span>
+      </div>
+      <label class="switch">Hands-free
+        <button type="button" role="switch" id="handsfree" aria-checked="true" aria-label="Hands-free listening"></button>
+      </label>
+    </div>
+
+    <div class="distance-bar" id="distance-bar">
+      <span id="dist-label">Distance in</span>
+      <div class="segmented" role="group" aria-label="Distance unit">
+        <button type="button" data-unit="steps" aria-pressed="true" id="unit-steps">Steps</button>
+        <button type="button" data-unit="meters" aria-pressed="false" id="unit-meters">Metres</button>
+      </div>
+      <label class="step" id="step-wrap"><span id="step-label">My step</span>
+        <input type="number" id="step_cm" min="30" max="120" step="1" value="65" inputmode="numeric" aria-describedby="step-hint"> <span>cm</span></label>
+      <span class="hint" id="step-hint">About 41% of your height: 170 cm tall ≈ 70 cm.</span>
+    </div>
+
+    <input type="hidden" id="select_mode" value="">
+    <input type="hidden" id="person_name" value="">
+  </section>
+
+  <!-- ---------- Controls ---------- -->
+  <aside class="side">
+    <div class="card guide-card" id="guide-card">
+      <button type="button" class="guide-toggle" id="guide-btn" aria-pressed="false" aria-label="Guide mode">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8a6 6 0 0 1 0 8.4M7.8 16.2a6 6 0 0 1 0-8.4M19.1 4.9a10 10 0 0 1 0 14.2M4.9 19.1a10 10 0 0 1 0-14.2"/></svg>
+      </button>
+      <div class="guide-text">
+        <b id="guide-title">Guide mode</b>
+        <span id="guide-sub">Keeps watching and speaks only when something changes: stairs, obstacles, someone approaching, a friend nearby.</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Ask about what’s in front of you</h2>
+      <div class="modes">
+        <button type="button" class="mode" data-mode="object">
+          <span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/></svg></span>
+          <b>Detect objects</b><small>say “detect”</small>
+        </button>
+        <button type="button" class="mode" data-mode="find">
+          <span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+          <b>Find object</b><small>say “find my keys”</small>
+        </button>
+        <button type="button" class="mode" data-mode="currency">
+          <span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 10v4M18 10v4"/></svg></span>
+          <b>Currency</b><small>say “currency”</small>
+        </button>
+        <button type="button" class="mode" data-mode="describe">
+          <span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg></span>
+          <b>Describe</b><small>say “describe”</small>
+        </button>
+        <button type="button" class="mode" data-mode="text">
+          <span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg></span>
+          <b>Read text</b><small>say “text”</small>
+        </button>
+        <button type="button" class="mode" data-mode="summarize">
+          <span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h7"/></svg></span>
+          <b>Summarize</b><small>say “summarize”</small>
+        </button>
+      </div>
+      <div class="field" id="object_to_be_found_container">
+        <input type="text" id="object_to_be_found" placeholder="What should I find? e.g. keys" aria-label="Object to find">
+        <button type="button" class="btn btn-ghost" id="find-go">Find</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>People</h2>
+      <div class="modes">
+        <button type="button" class="mode face" data-mode="face">
+          <span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span>
+          <b>Who is this?</b><small>say “who”</small>
+        </button>
+        <button type="button" class="mode face" data-mode="list_faces">
+          <span class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6"/></svg></span>
+          <b>Known people</b><small>“who do you know”</small>
+        </button>
+      </div>
+      <div class="field">
+        <input type="text" id="face_name_input" placeholder="Person’s name" aria-label="Person's name">
+      </div>
+      <div class="people-actions">
+        <button type="button" class="btn btn-face" id="remember-btn">Remember face</button>
+        <button type="button" class="btn btn-ghost danger" id="forget-btn">Forget</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Recent answers</h2>
+      <ul class="history" id="history"><li class="empty">Answers you hear will be listed here.</li></ul>
+    </div>
+  </aside>
+</main>
+
+<script>
+// =====================================================================
+// Smart Glasses — front-end
+// Voice-first: a blind user never needs the screen. The screen (boxes,
+// captions, history) is for the people around them, e.g. a presenter.
+// =====================================================================
+const $ = (id) => document.getElementById(id);
+const MODE_LABELS = {
+  en: { object: "Detect objects", find: "Find object", currency: "Currency", describe: "Describe",
+        text: "Read text", summarize: "Summarize", face: "Who is this?", add_face: "Remember face",
+        forget_face: "Forget face", list_faces: "Known people", guide: "Guide mode" },
+  ar: { object: "كشف الأشياء", find: "ابحث", currency: "العملة", describe: "وصف", text: "قراءة نص",
+        summarize: "تلخيص", face: "مين ده؟", add_face: "احفظ وش", forget_face: "انسى", list_faces: "الناس اللي أعرفها",
+        guide: "وضع الإرشاد" }
+};
+const SESSION = Math.random().toString(36).slice(2);
+let recognition, lastResult = "", busy = false, enrolling = false;
+let handsFree = true, speaking = false, listening = false, started = false;
+let guideOn = false;
+let noSpeech = 0;
+
+const lang = () => ($("language-selector").value === "ar-SA" ? "ar" : "en");
+
+// ---- distance: steps (default, a blind user counts them) or metres ----
+const units = { unit: "steps", step: 65 };
+try { units.unit = localStorage.getItem("glasses.unit") || "steps"; units.step = +localStorage.getItem("glasses.step") || 65; } catch (e) {}
+function setUnit(u, announce) {
+  units.unit = u === "meters" ? "meters" : "steps";
+  try { localStorage.setItem("glasses.unit", units.unit); } catch (e) {}
+  document.querySelectorAll("[data-unit]").forEach(b => b.setAttribute("aria-pressed", b.dataset.unit === units.unit));
+  $("step-wrap").classList.toggle("hidden", units.unit !== "steps");
+  $("step-hint").classList.toggle("hidden", units.unit !== "steps");
+  if (announce) say(lang() === "ar" ? (units.unit === "steps" ? "تمام، هقولك المسافة بالخطوات." : "تمام، هقولك المسافة بالمتر.")
+                                    : (units.unit === "steps" ? "OK, distances in steps." : "OK, distances in metres."));
+}
+function setStep(cm, announce) {
+  cm = Math.round(+cm);
+  if (!(cm >= 30 && cm <= 120)) return;
+  units.step = cm; $("step_cm").value = cm;
+  try { localStorage.setItem("glasses.step", cm); } catch (e) {}
+  if (announce) say(lang() === "ar" ? `تمام، خطوتك ${cm} سنتيمتر.` : `OK, your step is ${cm} centimetres.`);
+}
+function addUnits(form) { form.append("unit", units.unit); form.append("step_cm", units.step); return form; }
+// on-screen labels use the same unit as the voice
+function distLabel(s) {
+  const ar = lang() === "ar";
+  if (s.distance_m == null) return "";
+  if (units.unit === "meters") {
+    return s.distance === "close" ? (ar ? "قريب" : "close") : (s.distance && s.distance !== "far" ? `${s.distance} ${ar ? "م" : "m"}` : "");
+  }
+  if (s.distance_m < 0.6) return ar ? "في إيدك" : "in reach";
+  const n = Math.max(1, Math.round(s.distance_m / (units.step / 100)));
+  return n > 25 ? "" : (ar ? `${n} خطوة` : `${n} ${n === 1 ? "step" : "steps"}`);
+}
+const label = (mode) => MODE_LABELS[lang()][mode] || mode;
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// ---------------- Sound cues (earcons) ----------------
+let audioCtx;
+function tone(freqs, dur = 0.09, gap = 0.02, vol = 0.12) {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    let t = audioCtx.currentTime;
+    freqs.forEach(f => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(t); o.stop(t + dur + 0.02);
+      t += dur + gap;
+    });
+  } catch (e) { /* no sound available */ }
+}
+const cue = {
+  listening: () => tone([660, 880]),
+  understood: () => tone([880], 0.06),
+  done: () => tone([880, 660], 0.08),
+  error: () => tone([300, 240], 0.12),
+  shutter: () => tone([1200], 0.04, 0, 0.18),
+  warning: () => tone([980, 980, 980], 0.07, 0.05, 0.2),
+  guideOn: () => tone([523, 659, 784], 0.08),
+  guideOff: () => tone([784, 659, 523], 0.08)
+};
+
+// ---------------- Speech (text-to-speech) ----------------
+let voices = [];
+function loadVoices() { voices = window.speechSynthesis.getVoices(); }
+loadVoices();
+window.speechSynthesis.onvoiceschanged = loadVoices;
+function arabicVoice() {
+  return voices.find(v => v.lang === "ar-EG") || voices.find(v => /^ar([-_]|$)/i.test(v.lang)) || null;
+}
+let warnedArabic = false;
+
+// Speaks and resolves when finished. Listening pauses while talking so the
+// glasses never hear themselves.
+function speak(text, { interrupt = true } = {}) {
+  return new Promise(resolve => {
+    if (!text) return resolve();
+    if (interrupt) window.speechSynthesis.cancel();
+    stopListening();
+    speaking = true;
+    const u = new SpeechSynthesisUtterance(text);
+    const arabicText = /[\u0600-\u06FF]/.test(text);      // e.g. Arabic read from a sign in English mode
+    u.lang = arabicText ? "ar-SA" : (lang() === "ar" ? "en-US" : $("language-selector").value);
+    if (arabicText) {
+      const v = arabicVoice();
+      if (v) { try { u.voice = v; } catch (e) { /* keep the language only */ } u.lang = v.lang; }
+      else if (!warnedArabic) {
+        warnedArabic = true;
+        updateFeedback("No Arabic voice on this computer: Windows Settings → Time & language → Speech → Add voices → Arabic, then restart the browser.");
+      }
+    }
+    let resolved = false;
+    const finish = () => { if (!resolved) { resolved = true; resolve(); } };
+    const ended = () => {
+      speaking = false;
+      if (handsFree && started && !enrolling) setTimeout(listenIfIdle, 250);
+      finish();
+    };
+    u.onend = ended; u.onerror = ended;
+    // safety net: some browsers never fire onend - stop waiting, then resume listening
+    setTimeout(() => { if (!resolved) { if (!window.speechSynthesis.speaking) ended(); else finish(); } }, Math.min(20000, 1500 + text.length * 90));
+    window.speechSynthesis.speak(u);
+  });
+}
+
+// ---------------- Voice recognition (hands-free loop) ----------------
 function initializeRecognition() {
   if (!('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
-    alert("Speech Recognition API is not supported in your browser. Please use a compatible browser.");
+    updateFeedback("Voice commands need Google Chrome or Edge. You can still use the buttons.");
     return;
   }
   recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-  recognition.lang = document.getElementById("language-selector").value; // Set language dynamically
+  recognition.lang = $("language-selector").value;
   recognition.continuous = false;
   recognition.interimResults = false;
-
   recognition.onstart = () => {
-    document.getElementById("result-textbox").value = "Listening for a command...";
+    listening = true; $("mic-btn").classList.add("listening");
+    updateFeedback(lang() === "ar" ? "بسمع…" : "Listening…");
+    cue.listening();
+  };
+  recognition.onend = () => {
+    listening = false; $("mic-btn").classList.remove("listening");
+    if (handsFree && started) setTimeout(listenIfIdle, 300);
   };
   recognition.onerror = (event) => {
-    const errorMessage = `Error: ${event.error}`;
-    updateFeedback(errorMessage);
-    document.getElementById("result-textbox").value = errorMessage;
+    if (event.error === "no-speech") {
+      noSpeech = (noSpeech || 0) + 1;
+      if (noSpeech === 4) updateFeedback(lang() === "ar"
+        ? "مش سامع حاجة. اتأكد إن ميكروفون اللابتوب هو الافتراضي في إعدادات الصوت بتاعة ويندوز."
+        : "I can't hear anything. Make sure the laptop microphone is the default input in Windows Sound settings.");
+    }
+    const fatal = ["audio-capture", "not-allowed", "network", "service-not-allowed"];
+    const friendly = {
+      "audio-capture": "No microphone found. You can use the buttons instead.",
+      "not-allowed": "Microphone is blocked. Allow it in the browser, or use the buttons.",
+      "network": "Voice commands need internet. The buttons work offline."
+    };
+    if (fatal.includes(event.error)) { setHandsFree(false); cue.error(); }
+    if (friendly[event.error]) updateFeedback(friendly[event.error]);
   };
   recognition.onresult = (event) => {
-    handleVoiceCommand(event);
-    document.getElementById("result-textbox").value = event.results[0][0].transcript;
+    noSpeech = 0;
+    const heard = event.results[0][0].transcript;
+    updateFeedback((lang() === "ar" ? "قلت: " : "You said: ") + `“${heard}”`);
+    handleVoiceCommand(heard);
   };
 }
-
-// Handle voice commands
-function handleVoiceCommand(event) {
-  const voiceCommand = event.results[0][0].transcript.toLowerCase();
-  const currentLanguage = document.getElementById("language-selector").value;
-
-  const modeMapping = {
-    "en-US": {
-      "find": () => {
-        const objectToFind = voiceCommand.replace("find", "").trim();
-        document.getElementById('object_to_be_found').value = objectToFind;
-        selectMode("find");
-      },
-      "detect": () => selectMode("object"),
-      "currency": () => selectMode("currency"),
-      "describe": () => selectMode("describe"),
-      "text": () => selectMode("text"),
-      "summarize": () => selectMode("summarize")
-    },
-    "ar-SA": {
-      "ابحث": () => {
-        const objectToFind = voiceCommand.replace("ابحث", "").trim();
-        document.getElementById('object_to_be_found').value = objectToFind;
-        selectMode("find");
-      },
-      "كشف": () => selectMode("object"),
-      "عمله": () => selectMode("currency"),
-      "وصف": () => selectMode("describe"),
-      "نص": () => selectMode("text"),
-      "تلخيص": () => selectMode("summarize")
+// Chrome's speech recognition normally listens to the Windows DEFAULT microphone.
+// Phone-camera apps (Iriun, DroidCam...) install a silent virtual microphone and
+// often make it the default, so the glasses "listen" but hear nothing.
+// Newer Chrome versions accept an audio track in start(): we pass the real mic.
+const VIRTUAL_MIC = /iriun|droidcam|virtual|obs|stereo mix|camo|ivcam|voicemeeter|cable/i;
+let micTrack = null, micTrackSupported = true;
+async function prepareMicrophone() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const mics = devices.filter(d => d.kind === "audioinput");
+    const def = mics.find(d => d.deviceId === "default");
+    const real = mics.find(d => d.deviceId !== "default" && d.deviceId !== "communications" && !VIRTUAL_MIC.test(d.label));
+    if (def && VIRTUAL_MIC.test(def.label)) {
+      console.warn("[glasses] default microphone is virtual:", def.label, "-> using", real && real.label);
+      updateFeedback(lang() === "ar"
+        ? `الميكروفون الافتراضي هو "${def.label}". لو الصوت مش شغال: إعدادات ويندوز ← الصوت ← Input ← اختار ميكروفون اللابتوب.`
+        : `Your default microphone is "${def.label}". If voice doesn't work: Windows Settings → Sound → Input → choose the laptop microphone.`);
     }
-  };
-
-  const commands = modeMapping[currentLanguage];
-  const matchedCommand = Object.keys(commands).find(cmd => voiceCommand.includes(cmd));
-  if (matchedCommand) {
-    commands[matchedCommand]();
-    captureAndSend(); // Automatically capture and process after recognizing the command
-  } else {
-    updateFeedback("Sorry, I didn't understand the command.");
+    if (real) {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: real.deviceId } } });
+      micTrack = stream.getAudioTracks()[0];
+    }
+  } catch (e) { console.warn("[glasses] microphone check failed", e); }
+}
+function listenIfIdle() {
+  if (!recognition || listening || speaking || busy || enrolling) return;
+  recognition.lang = $("language-selector").value;
+  try {
+    if (micTrack && micTrackSupported && micTrack.readyState === "live") recognition.start(micTrack);
+    else recognition.start();
+  } catch (e) {
+    if (e && e.name === "TypeError" && micTrack) {      // this Chrome can't take a track: use the default mic
+      micTrackSupported = false;
+      try { recognition.start(); } catch (e2) { /* already started */ }
+    }
   }
 }
-
-// Update feedback text
-function updateFeedback(message) {
-  document.getElementById("voice-feedback").innerText = message;
-}
-
-// Start voice recognition
 function startVoiceRecognition() {
   if (!recognition) initializeRecognition();
-  recognition.lang = document.getElementById("language-selector").value; // Update language before starting
-  recognition.start();
+  if (!recognition) return;
+  window.speechSynthesis.cancel(); speaking = false;
+  listenIfIdle();
 }
-
-// Select mode and toggle object input visibility
-function selectMode(mode) {
-  document.getElementById("select_mode").value = mode;
-  document.getElementById("object_to_be_found_container").style.display = (mode === "find") ? "block" : "none";
-  console.log("Selected mode:", mode);
+function stopListening() { if (recognition && listening) { try { recognition.abort(); } catch (e) {} } }
+function setHandsFree(on) {
+  handsFree = on; $("handsfree").setAttribute("aria-checked", on);
+  if (on) listenIfIdle();
 }
+function updateFeedback(message) { $("voice-feedback").innerText = message; }
 
-// Capture and send the frame
-function captureAndSend() {
-  const canvas = document.getElementById('canvas');
-  const video = document.getElementById('video');
-  const ctx = canvas.getContext('2d');
-
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-  canvas.toBlob(blob => {
-    const formData = new FormData();
-    formData.append('image', blob, 'frame.jpg');
-    formData.append('select_mode', document.getElementById('select_mode').value);
-    formData.append('object_to_be_found', document.getElementById('object_to_be_found').value);
-
-    sendToServer(formData);
-  }, 'image/jpeg');
-}
-
-// Send data to the server
-function sendToServer(formData) {
-  fetch('/detect', { method: 'POST', body: formData })
-    .then(res => {
-      if (!res.ok) {
-        throw new Error(`Server responded with status: ${res.status}`);
-      }
-      return res.json();
-    })
-    .then(data => {
-      if (data && data[0] && data[0].result) {
-        let resultText = data[0].result;
-
-        // Check if the selected language is Arabic
-        const selectedLanguage = document.getElementById("language-selector").value;
-        if (selectedLanguage === "ar-SA") {
-          // Translate the result to Arabic
-          translateToArabic(resultText).then(translatedText => {
-            updateFeedback(translatedText); // Update the "You said" field
-            document.getElementById("read-only-field").value = translatedText; // Update the "Detection Result" field
-            speak(translatedText); // Speak the translated result
-          });
-        } else {
-          updateFeedback(resultText); // Update the "You said" field
-          document.getElementById("read-only-field").value = resultText; // Update the "Detection Result" field
-          speak(resultText); // Speak the result
-        }
-
-        if (data[0].image_url) {
-          displayImage(data[0].image_url);
-        }
-      } else {
-        updateFeedback("Unexpected response format from the server.");
-      }
-    })
-    .catch(err => {
-      console.error("Error during processing:", err);
-      updateFeedback("Error during processing. Please try again.");
-    });
-}
-
-// Display the uploaded image
-function displayImage(imageUrl) {
-  const imageContainer = document.getElementById('image-container');
-  const uploadedImage = document.getElementById('uploaded-image');
-  uploadedImage.src = imageUrl;
-  imageContainer.style.display = 'block';
-}
-
-// Convert text to speech
-function speak(text) {
-  const utterance = new SpeechSynthesisUtterance(text);
-  const selectedLanguage = document.getElementById("language-selector").value;
-
-  // Set the language for speech synthesis
-  utterance.lang = selectedLanguage;
-
-  // Adjust voice settings for Arabic
-  if (selectedLanguage === "ar-SA") {
-    utterance.voice = speechSynthesis.getVoices().find(voice => voice.lang === "ar-SA");
-  }
-
-  window.speechSynthesis.speak(utterance);
-}
-
-// Start the webcam
-function startWebcam() {
-  navigator.mediaDevices.getUserMedia({ video: true })
-    .then(stream => document.getElementById("video").srcObject = stream)
-    .catch(err => alert("Error accessing webcam: " + err));
-}
-
-function translateToArabic(text) {
-  const apiUrl = "https://api.mymemory.translated.net/get"; // Example translation API
-  const params = new URLSearchParams({
-    q: text,
-    langpair: "en|ar"
-  });
-
-  return fetch(`${apiUrl}?${params}`)
-    .then(res => {
-      if (!res.ok) {
-        throw new Error(`Translation API responded with status: ${res.status}`);
-      }
-      return res.json();
-    })
-    .then(data => {
-      if (data && data.responseData && data.responseData.translatedText) {
-        return data.responseData.translatedText;
-      } else {
-        console.error("Unexpected translation API response:", data);
-        return text; // Fallback to original text if translation fails
-      }
-    })
-    .catch(err => {
-      console.error("Error during translation:", err);
-      return text; // Fallback to original text if translation fails
-    });
-}
-
-  if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
-    startVoiceRecognition(); // Automatically start voice recognition on page load
-  }
-window.onload = () => {
-  initializeRecognition();
-  startWebcam();
-  startVoiceRecognition(); // Automatically start voice recognition on page load
+const HELP = {
+  en: "You can say: guide, to start or stop guide mode. Detect. Find, then an object. Currency. Describe. Text. Summarize. Who. Remember, then a name. Forget, then a name. Who do you know. In steps, or in metres. My step is, then centimetres. Repeat. Or stop.",
+  ar: "تقدر تقول: إرشاد، عشان أراقب وأنبهك. كشف. ابحث عن حاجة. عملة. وصف. اقرا. تلخيص. مين. احفظ واسم الشخص. انسى واسم الشخص. تعرف مين. بالخطوات أو بالمتر. خطوتي والرقم بالسنتيمتر. كرر. أو اسكت."
 };
+
+// Ordered: longer / more specific phrases first.
+const COMMANDS = {
+  en: [
+    ["in steps", () => setUnit("steps", true)], ["use steps", () => setUnit("steps", true)],
+    ["in meters", () => setUnit("meters", true)], ["in metres", () => setUnit("meters", true)],
+    ["use meters", () => setUnit("meters", true)], ["use metres", () => setUnit("meters", true)],
+    ["my step is", (t) => setStep((t.match(/\d+/) || [])[0], true)],
+    ["stop guide", () => setGuide(false)], ["guide off", () => setGuide(false)],
+    ["start guide", () => setGuide(true)], ["guide", () => setGuide(!guideOn)],
+    ["help", () => say(HELP.en)], ["repeat", () => say(lastResult || "Nothing to repeat yet.")],
+    ["again", () => say(lastResult || "Nothing to repeat yet.")],
+    ["stop", () => { window.speechSynthesis.cancel(); speaking = false; updateFeedback("Stopped."); }],
+    ["who do you know", () => run("list_faces")],
+    ["remember", (t) => guidedEnroll(t.split("remember")[1])],
+    ["forget", (t) => run("forget_face", { person_name: t.split("forget")[1] })],
+    ["who", () => run("face")],
+    ["find", (t) => run("find", { object_to_be_found: t.replace(/.*find/, "") })],
+    ["where is", (t) => run("find", { object_to_be_found: t.replace(/.*where is/, "") })],
+    ["detect", () => run("object")], ["what's in front", () => run("object")], ["what is in front", () => run("object")],
+    ["currency", () => run("currency")], ["money", () => run("currency")],
+    ["describe", () => run("describe")], ["summar", () => run("summarize")],
+    ["text", () => run("text")], ["read", () => run("text")]
+  ],
+  ar: [
+    ["بالخطوات", () => setUnit("steps", true)], ["بالخطوه", () => setUnit("steps", true)],
+    ["بالمتر", () => setUnit("meters", true)],
+    ["خطوتي", (t) => setStep((t.replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).match(/\d+/) || [])[0], true)],
+    ["وقف الارشاد", () => setGuide(false)], ["وقف الإرشاد", () => setGuide(false)],
+    ["ارشاد", () => setGuide(!guideOn)], ["إرشاد", () => setGuide(!guideOn)],
+    ["مساعده", () => say(HELP.ar)], ["مساعدة", () => say(HELP.ar)],
+    ["كرر", () => say(lastResult || "مفيش حاجة أكررها.")],
+    ["اسكت", () => { window.speechSynthesis.cancel(); speaking = false; updateFeedback("تمام."); }],
+    ["تعرف مين", () => run("list_faces")],
+    ["احفظ", (t) => guidedEnroll(t.split("احفظ")[1])],
+    ["انسى", (t) => run("forget_face", { person_name: t.split("انسى")[1] })],
+    ["مين", () => run("face")],
+    ["ابحث", (t) => run("find", { object_to_be_found: t.split("ابحث")[1] })],
+    ["فين", (t) => run("find", { object_to_be_found: t.split("فين")[1] })],
+    ["كشف", () => run("object")], ["قدامي", () => run("object")],
+    ["عمله", () => run("currency")], ["عملة", () => run("currency")], ["فلوس", () => run("currency")],
+    ["وصف", () => run("describe")], ["اوصف", () => run("describe")],
+    ["تلخيص", () => run("summarize")], ["لخص", () => run("summarize")],
+    ["نص", () => run("text")], ["اقرا", () => run("text")], ["اقرأ", () => run("text")]
+  ]
+};
+function handleVoiceCommand(transcript) {
+  const t = String(transcript).toLowerCase().trim();
+  const match = COMMANDS[lang()].find(([key]) => t.includes(key));
+  if (match) { cue.understood(); match[1](t); return true; }
+  cue.error();
+  say(lang() === "ar" ? "مفهمتش. قول مساعدة." : "Sorry, I didn't understand. Say help.");
+  return false;
+}
+
+// ---------------- Modes ----------------
+function selectMode(mode) {
+  $("select_mode").value = mode;
+  $("object_to_be_found_container").style.display = (mode === "find") ? "flex" : "none";
+  if (!guideOn) $("mode-chip").innerText = label(mode);
+  document.querySelectorAll(".mode").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === mode));
+}
+
+async function run(mode, extra = {}) {
+  if (extra.object_to_be_found !== undefined) $("object_to_be_found").value = extra.object_to_be_found.trim();
+  if (extra.person_name !== undefined) $("person_name").value = extra.person_name.trim();
+  selectMode(mode);
+  if (mode === "find" && !$("object_to_be_found").value.trim()) {
+    $("object_to_be_found").focus();
+    return showResult(lang() === "ar" ? "أدور على إيه؟ اكتب الحاجة أو قول: ابحث عن كوباية." : "What should I look for? Type it, or say: find cup.", mode);
+  }
+  if (mode === "forget_face" && !$("person_name").value.trim()) {
+    return showResult(lang() === "ar" ? "قول اسم الشخص اللي أنساه." : "Say or type the name to forget.", mode);
+  }
+  const blob = await captureFrame();
+  if (!blob && !["list_faces", "forget_face"].includes(mode)) {
+    return showResult(lang() === "ar" ? "الكاميرا مش جاهزة لسه." : "The camera isn't ready yet.", mode);
+  }
+  const form = new FormData();
+  form.append("image", blob || new Blob(), "frame.jpg");
+  form.append("select_mode", mode);
+  form.append("lang", lang());
+  addUnits(form);
+  form.append("object_to_be_found", $("object_to_be_found").value);
+  form.append("person_name", $("person_name").value);
+  setBusy(true);
+  try {
+    const res = await fetch("/detect", { method: "POST", body: form });
+    if (!res.ok) throw new Error(res.status);
+    const data = (await res.json())[0];
+    let text = data.result;
+    if (data.translate && lang() === "ar") text = await translateToArabic(text);
+    drawDetections(data.detections || [], 6000);
+    showResult(text, mode);
+  } catch (err) {
+    console.error(err);
+    showResult(lang() === "ar" ? "حصلت مشكلة. جرب تاني." : "Something went wrong. Please try again.", mode);
+  } finally {
+    setBusy(false);
+  }
+}
+
+// ---------------- Camera frames ----------------
+function captureFrame(maxWidth = 1280) {
+  return new Promise(resolve => {
+    const video = $("video");
+    if (!video.videoWidth) return resolve(null);
+    const scale = Math.min(1, maxWidth / video.videoWidth);
+    const canvas = $("canvas");
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(b => resolve(b), "image/jpeg", 0.9);
+  });
+}
+
+// ---------------- Guided enrollment ("remember Ahmed") ----------------
+const ENROLL_PROMPTS = {
+  en: ["Look straight at the camera.", "Now turn your head a little to the left.", "Now a little to the right."],
+  ar: ["بص للكاميرا على طول.", "لف راسك سنة صغيرة للشمال.", "دلوقتي سنة صغيرة لليمين."]
+};
+async function guidedEnroll(rawName) {
+  const name = (rawName || $("face_name_input").value || "").trim();
+  if (!name) {
+    $("face_name_input").focus();
+    return say(lang() === "ar" ? "قول اسم الشخص، مثلًا: احفظ منى." : "Say the person's name, for example: remember Mona.");
+  }
+  if (enrolling) return;
+  const video = $("video");
+  if (!video.videoWidth) return showResult(lang() === "ar" ? "الكاميرا مش جاهزة لسه." : "The camera isn't ready yet.", "add_face");
+  enrolling = true; stopListening();
+  const wasGuide = guideOn; if (wasGuide) setGuide(false, true);
+  selectMode("add_face");
+  $("mode-chip").innerText = `${label("add_face")}: ${name}`;
+  $("steps").classList.remove("hidden");
+  const dots = [...$("steps").children]; dots.forEach(d => d.classList.remove("done"));
+  const blobs = [];
+  try {
+    for (let i = 0; i < 3; i++) {
+      await speak(ENROLL_PROMPTS[lang()][i]);
+      await sleep(500);
+      const b = await captureFrame();
+      if (b) blobs.push(b);
+      cue.shutter();
+      $("viewport").classList.remove("flash"); void $("viewport").offsetWidth; $("viewport").classList.add("flash");
+      dots[i].classList.add("done");
+    }
+    const form = new FormData();
+    blobs.forEach((b, i) => form.append("images", b, `face${i}.jpg`));
+    form.append("person_name", name);
+    form.append("lang", lang());
+    addUnits(form);
+    setBusy(true);
+    const res = await fetch("/face/enroll", { method: "POST", body: form });
+    const data = (await res.json())[0];
+    showResult(data.result, "add_face");
+  } catch (e) {
+    console.error(e);
+    showResult(lang() === "ar" ? "حصلت مشكلة وأنا بحفظ الوش." : "Something went wrong while saving the face.", "add_face");
+  } finally {
+    setBusy(false); enrolling = false;
+    setTimeout(() => $("steps").classList.add("hidden"), 1500);
+    if (wasGuide) setGuide(true, true);
+  }
+}
+
+// ---------------- Guide mode (continuous, motion-aware) ----------------
+async function setGuide(on, quiet = false) {
+  if (on === guideOn) return;
+  guideOn = on;
+  $("guide-btn").setAttribute("aria-pressed", on);
+  $("guide-card").classList.toggle("guide-on", on);
+  $("chip").classList.toggle("guide", on);
+  $("mode-chip").innerText = on ? label("guide") : (lang() === "ar" ? "اختار خاصية أو اتكلم" : "Choose a mode or speak");
+  $("guide-title").innerText = on ? (lang() === "ar" ? "الإرشاد شغال" : "Guide mode is on") : label("guide");
+  if (!on) {
+    const f = new FormData(); f.append("session", SESSION);
+    fetch("/guide/reset", { method: "POST", body: f }).catch(() => {});
+    if (!quiet) { cue.guideOff(); say(lang() === "ar" ? "وقفت الإرشاد." : "Guide mode off."); }
+    return;
+  }
+  if (!quiet) {
+    cue.guideOn();
+    await say(lang() === "ar" ? "الإرشاد شغال. هنبهك لو حاجة قربت أو حد تعرفه ظهر." : "Guide mode on. I'll tell you when something changes.");
+  }
+  guideLoop();
+}
+async function guideLoop() {
+  while (guideOn) {
+    const t0 = performance.now();
+    if (!busy && !enrolling) {
+      const blob = await captureFrame(960);
+      if (blob) {
+        try {
+          const form = new FormData();
+          form.append("image", blob, "g.jpg"); form.append("session", SESSION); form.append("lang", lang()); addUnits(form);
+          const res = await fetch("/guide", { method: "POST", body: form });
+          const data = await res.json();
+          if (!guideOn) break;
+          drawDetections(data.detections || [], 1600);
+          const ev = (data.events || [])[0];
+          if (ev) {
+            const urgent = ev.type === "obstacle";
+            if (urgent) { cue.warning(); showResult(ev.text, "guide", false, true); speak(ev.text); }
+            else if (!speaking) { showResult(ev.text, "guide", false); speak(ev.text, { interrupt: false }); }
+            else addHistory(ev.text, "guide");
+          }
+        } catch (e) { console.error(e); }
+      }
+    }
+    await sleep(Math.max(250, 1200 - (performance.now() - t0)));
+  }
+}
+
+// ---------------- Live boxes over the camera ----------------
+const overlay = $("overlay"), octx = overlay.getContext("2d");
+let shapes = [];
+function colorFor(d) {
+  if (d.kind === "face") return d.certainty === "sure" ? "#a9c1ff" : d.certainty === "maybe" ? "#ffcf70" : "#c9cdd3";
+  if (d.kind === "currency") return "#46d483";
+  return "#f3f3ee";
+}
+function drawDetections(dets, ttl) {
+  const now = performance.now();
+  // keep faces drawn by guide mode on top of person boxes, drop old ones
+  shapes = dets.map(d => ({ ...d, born: now, ttl }));
+}
+function videoRect() {
+  // the video uses object-fit: cover — work out where the picture really is
+  const v = $("video"), W = overlay.clientWidth, H = overlay.clientHeight;
+  if (!v.videoWidth) return { x: 0, y: 0, w: W, h: H };
+  const s = Math.max(W / v.videoWidth, H / v.videoHeight);
+  const w = v.videoWidth * s, h = v.videoHeight * s;
+  return { x: (W - w) / 2, y: (H - h) / 2, w, h };
+}
+function render() {
+  const dpr = window.devicePixelRatio || 1;
+  const W = overlay.clientWidth, H = overlay.clientHeight;
+  if (overlay.width !== W * dpr) { overlay.width = W * dpr; overlay.height = H * dpr; }
+  octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  octx.clearRect(0, 0, W, H);
+  const r = videoRect(), now = performance.now();
+  shapes = shapes.filter(s => now - s.born < s.ttl + 400);
+  for (const s of shapes) {
+    const age = now - s.born;
+    const alpha = Math.min(1, age / 220) * (age > s.ttl ? Math.max(0, 1 - (age - s.ttl) / 400) : 1);
+    const grow = 1 + 0.06 * Math.max(0, 1 - age / 220);
+    let [x1, y1, x2, y2] = s.box;
+    x1 = r.x + x1 * r.w; x2 = r.x + x2 * r.w; y1 = r.y + y1 * r.h; y2 = r.y + y2 * r.h;
+    const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2, bw = (x2 - x1) * grow, bh = (y2 - y1) * grow;
+    x1 = cx - bw / 2; y1 = cy - bh / 2;
+    const c = colorFor(s), L = Math.min(22, bw / 4, bh / 4);
+    octx.globalAlpha = alpha;
+    octx.strokeStyle = c; octx.lineWidth = s.kind === "face" ? 3 : 2.5; octx.lineCap = "round";
+    octx.beginPath();   // corner brackets
+    [[x1, y1, 1, 1], [x1 + bw, y1, -1, 1], [x1, y1 + bh, 1, -1], [x1 + bw, y1 + bh, -1, -1]].forEach(([x, y, dx, dy]) => {
+      octx.moveTo(x + dx * L, y); octx.lineTo(x, y); octx.lineTo(x, y + dy * L);
+    });
+    octx.stroke();
+    octx.globalAlpha = alpha * 0.10; octx.fillStyle = c; octx.fillRect(x1, y1, bw, bh);
+    octx.globalAlpha = alpha;
+    const dist = distLabel(s);
+    const text = [s.name || s.label, dist].filter(Boolean).join(" · ");
+    octx.font = "700 14px 'Atkinson Hyperlegible', 'Plex Arabic', Segoe UI, sans-serif";
+    const tw = octx.measureText(text).width + 14;
+    const ty = y1 > 26 ? y1 - 24 : y1 + 4;
+    octx.fillStyle = c; roundRect(x1, ty, tw, 20, 6); octx.fill();
+    octx.fillStyle = "#17181a"; octx.fillText(text, x1 + 7, ty + 15);
+  }
+  octx.globalAlpha = 1;
+  requestAnimationFrame(render);
+}
+function roundRect(x, y, w, h, r) {
+  octx.beginPath(); octx.moveTo(x + r, y); octx.arcTo(x + w, y, x + w, y + h, r); octx.arcTo(x + w, y + h, x, y + h, r);
+  octx.arcTo(x, y + h, x, y, r); octx.arcTo(x, y, x + w, y, r); octx.closePath();
+}
+requestAnimationFrame(render);
+
+// ---------------- Results ----------------
+function setBusy(on) {
+  busy = on;
+  if (on) stopListening();
+  $("viewport").classList.toggle("busy", on);
+  $("spinner").classList.toggle("hidden", !on);
+  if (on) { $("caption").className = "caption-text placeholder"; $("caption").innerText = lang() === "ar" ? "ببص…" : "Looking…"; }
+}
+function say(text) { return showResult(text, "", true); }
+function showResult(text, mode, speakIt = true, urgent = false) {
+  text = String(text || "").trim();
+  if (!text) return;
+  lastResult = text;
+  const cap = $("caption");
+  cap.className = "caption-text";
+  void cap.offsetWidth; cap.classList.add("enter");
+  cap.dir = /[؀-ۿ]/.test(text) ? "rtl" : "ltr";
+  cap.innerText = text;
+  $("caption-box").classList.toggle("urgent", urgent);
+  if (urgent) setTimeout(() => $("caption-box").classList.remove("urgent"), 2500);
+  if (mode !== "") addHistory(text, mode);
+  if (speakIt) { cue.done(); return sleep(160).then(() => speak(text)); }
+}
+function addHistory(text, mode) {
+  const list = $("history");
+  list.querySelector(".empty")?.remove();
+  const li = document.createElement("li");
+  li.innerHTML = `<time></time><span class="tag"></span><span class="msg"></span>`;
+  li.querySelector("time").innerText = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  li.querySelector(".tag").innerText = mode ? label(mode).split(" ")[0] : "";
+  li.querySelector(".msg").innerText = text;
+  li.querySelector(".msg").dir = /[؀-ۿ]/.test(text) ? "rtl" : "ltr";
+  list.prepend(li);
+  while (list.children.length > 8) list.lastChild.remove();
+}
+function translateToArabic(text) {
+  const params = new URLSearchParams({ q: text, langpair: "en|ar" });
+  return fetch(`https://api.mymemory.translated.net/get?${params}`)
+    .then(res => res.ok ? res.json() : Promise.reject(res.status))
+    .then(data => (data && data.responseData && data.responseData.translatedText) || text)
+    .catch(() => text);
+}
+
+
+// ---------------- Interface language ----------------
+const UI = {
+  "#dist-label": ["Distance in", "المسافة"],
+  "#unit-steps": ["Steps", "خطوات"],
+  "#unit-meters": ["Metres", "متر"],
+  "#step-label": ["My step", "خطوتي"],
+  "#step-hint": ["About 41% of your height: 170 cm tall ≈ 70 cm.", "حوالي ٤١٪ من طولك: لو طولك ١٧٠ سم تبقى خطوتك ٧٠ سم تقريبًا."],
+  "#guide-title": ["Guide mode", "وضع الإرشاد"],
+  "#guide-sub": ["Keeps watching and speaks only when something changes: stairs, obstacles, someone approaching, a friend nearby.",
+                 "بيفضل يراقب ويتكلم بس لما حاجة تتغير: سلم، عائق، حد بيقرب، أو صاحبك ظهر."],
+  ".side .card:nth-child(2) h2": ["Ask about what’s in front of you", "اسأل عن اللي قدامك"],
+  ".side .card:nth-child(3) h2": ["People", "الناس"],
+  ".side .card:nth-child(4) h2": ["Recent answers", "آخر الإجابات"],
+  "[data-mode=object] b": ["Detect objects", "كشف الأشياء"], "[data-mode=object] small": ["say “detect”", "قول “كشف”"],
+  "[data-mode=find] b": ["Find object", "دوّر على حاجة"], "[data-mode=find] small": ["say “find my keys”", "قول “ابحث عن المفاتيح”"],
+  "[data-mode=currency] b": ["Currency", "العملة"], "[data-mode=currency] small": ["say “currency”", "قول “فلوس”"],
+  "[data-mode=describe] b": ["Describe", "وصف المكان"], "[data-mode=describe] small": ["say “describe”", "قول “وصف”"],
+  "[data-mode=text] b": ["Read text", "قراءة نص"], "[data-mode=text] small": ["say “text”", "قول “اقرا”"],
+  "[data-mode=summarize] b": ["Summarize", "تلخيص"], "[data-mode=summarize] small": ["say “summarize”", "قول “لخص”"],
+  "[data-mode=face] b": ["Who is this?", "مين ده؟"], "[data-mode=face] small": ["say “who”", "قول “مين”"],
+  "[data-mode=list_faces] b": ["Known people", "اللي أعرفهم"], "[data-mode=list_faces] small": ["say “who do you know”", "قول “تعرف مين”"],
+  "#remember-btn": ["Remember face", "احفظ الوش"], "#forget-btn": ["Forget", "انسى"], "#find-go": ["Find", "دوّر"],
+  ".switch": null,
+  ".voice-text > span": ["Try “who”, “find my keys”, “guide” or “help”. Press Space to talk.",
+                         "جرّب “مين”، “ابحث عن المفاتيح”، “إرشاد” أو “مساعدة”. اضغط المسافة عشان تتكلم."],
+  ".brand p": ["Assistive vision for visually impaired people", "رؤية مساعدة للمكفوفين وضعاف البصر"]
+};
+const UI_PLACEHOLDER = { "#face_name_input": ["Person’s name", "اسم الشخص"], "#object_to_be_found": ["What should I find? e.g. bottle", "أدور على إيه؟ مثلًا إزازة"] };
+function applyLanguage() {
+  const i = lang() === "ar" ? 1 : 0;
+  for (const [sel, pair] of Object.entries(UI)) {
+    if (!pair) continue;
+    document.querySelectorAll(sel).forEach(el => { el.textContent = pair[i]; el.dir = i ? "rtl" : "ltr"; });
+  }
+  for (const [sel, pair] of Object.entries(UI_PLACEHOLDER)) { $(sel.slice(1)).placeholder = pair[i]; }
+  const sw = document.querySelector(".switch"); sw.firstChild.textContent = i ? "بدون إيدين " : "Hands-free ";
+  if (!guideOn && !busy) $("mode-chip").innerText = i ? "اختار خاصية أو اتكلم" : "Choose a mode or speak";
+  if (guideOn) $("guide-title").innerText = i ? "الإرشاد شغال" : "Guide mode is on";
+  const empty = document.querySelector("#history .empty"); if (empty) empty.textContent = i ? "الإجابات اللي تسمعها هتظهر هنا." : "Answers you hear will be listed here.";
+  updateFeedback(i ? "اضغط المايك وقول أمر" : "Tap the mic and say a command");
+}
+
+// ---------------- Buttons & inputs ----------------
+document.querySelectorAll(".mode").forEach(btn => btn.addEventListener("click", () => run(btn.dataset.mode)));
+$("find-go").addEventListener("click", () => run("find"));
+$("object_to_be_found").addEventListener("keydown", e => { if (e.key === "Enter") run("find"); });
+$("remember-btn").addEventListener("click", () => guidedEnroll($("face_name_input").value));
+$("forget-btn").addEventListener("click", () => run("forget_face", { person_name: $("face_name_input").value }));
+$("face_name_input").addEventListener("keydown", e => { if (e.key === "Enter") guidedEnroll($("face_name_input").value); });
+$("guide-btn").addEventListener("click", () => setGuide(!guideOn));
+document.querySelectorAll("[data-unit]").forEach(b => b.addEventListener("click", () => setUnit(b.dataset.unit)));
+$("step_cm").addEventListener("change", () => setStep($("step_cm").value));
+setUnit(units.unit); setStep(units.step);
+$("mic-btn").addEventListener("click", startVoiceRecognition);
+$("handsfree").addEventListener("click", () => setHandsFree(!handsFree));
+$("repeat-btn").addEventListener("click", () => { if (lastResult) speak(lastResult); });
+document.querySelectorAll("[data-lang]").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll("[data-lang]").forEach(x => x.setAttribute("aria-pressed", x === b));
+  $("language-selector").value = b.dataset.lang;
+  document.documentElement.lang = lang();
+  applyLanguage();
+  if (recognition) recognition.lang = b.dataset.lang;
+  stopListening();
+}));
+document.addEventListener("keydown", e => {
+  if (!started) { e.preventDefault(); startGlasses(); return; }
+  const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
+  if (e.code === "Space" && !typing && document.activeElement.tagName !== "BUTTON") { e.preventDefault(); startVoiceRecognition(); }
+  if (e.key.toLowerCase() === "g" && !typing && !e.ctrlKey && !e.metaKey) setGuide(!guideOn);
+}, true);
+
+// ---------------- Camera (with camera picker, e.g. phone as webcam) ----------------
+let currentStream;
+function startWebcam(deviceId) {
+  if (currentStream) currentStream.getTracks().forEach(t => t.stop());
+  const video = deviceId ? { deviceId: { exact: deviceId }, width: { ideal: 1280 } } : { width: { ideal: 1280 } };
+  return navigator.mediaDevices.getUserMedia({ video })
+    .then(stream => {
+      currentStream = stream; $("video").srcObject = stream;
+      $("cam-dot").classList.add("live"); $("cam-status").innerText = "Camera live";
+      return listCameras(stream.getVideoTracks()[0].getSettings().deviceId);
+    })
+    .catch(err => {
+      $("cam-dot").classList.remove("live"); $("cam-status").innerText = "No camera — click to retry";
+      const reasons = {
+        NotAllowedError: "Camera permission is blocked. Click the icon left of the address bar, allow Camera, then reload. Also check Windows Settings → Privacy → Camera.",
+        NotFoundError: "No camera found. Connect the camera (or the phone camera app) and click “No camera” to retry.",
+        NotReadableError: "The camera is busy: another tab or app is using it (another Smart Glasses tab, Camera app, Zoom…). Close it — I'll keep retrying.",
+        OverconstrainedError: "That camera isn't sending a picture. If it's the phone, open the Iriun app on the phone, then pick it again from the camera list."
+      };
+      showResult(reasons[err.name] || `Camera error: ${err.name} ${err.message}`, "", false);
+      listCameras(null);
+      if (err.name === "NotReadableError" || err.name === "AbortError") retryCameraSoon();
+      if (err.name === "OverconstrainedError" && deviceId) {
+        $("cam-status").innerText = "That camera has no picture — check the phone app";
+        setTimeout(() => startWebcam(), 1500);    // fall back to the default camera
+      }
+    });
+}
+// Remember the chosen camera, and prefer a real/phone camera over "OBS Virtual Camera".
+function savedCamera() { try { return localStorage.getItem("glasses.camera") || ""; } catch (e) { return ""; } }
+function saveCamera(label) { try { localStorage.setItem("glasses.camera", label); } catch (e) {} }
+let autoPicked = false;
+function preferredCamera(cams, activeId) {
+  if (autoPicked) return null;
+  autoPicked = true;
+  const active = cams.find(c => c.deviceId === activeId);
+  const saved = savedCamera();
+  const bySaved = saved && cams.find(c => c.label === saved);
+  if (bySaved && bySaved.deviceId !== activeId) return bySaved;
+  if (!bySaved && active && /obs virtual/i.test(active.label)) {
+    return cams.find(c => /iriun|droidcam|camo|ivcam/i.test(c.label)) || cams.find(c => !/obs virtual/i.test(c.label)) || null;
+  }
+  return null;
+}
+function listCameras(activeId) {
+  return navigator.mediaDevices.enumerateDevices().then(devices => {
+    const cams = devices.filter(d => d.kind === "videoinput"), sel = $("camera-select");
+    const better = activeId ? preferredCamera(cams, activeId) : null;
+    if (better) { startWebcam(better.deviceId); return; }
+    sel.innerHTML = "";
+    cams.forEach((c, i) => {
+      const o = document.createElement("option");
+      o.value = c.deviceId; o.textContent = c.label || `Camera ${i + 1}`;
+      if (c.deviceId === activeId) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.classList.toggle("hidden", cams.length < 2);
+  });
+}
+$("camera-select").addEventListener("change", e => { saveCamera(e.target.selectedOptions[0].textContent); startWebcam(e.target.value); });
+
+// Only one tab/app can use a camera on many Windows drivers (Iriun, DroidCam...).
+// Release it when this tab is hidden and take it back when it is shown again,
+// and keep retrying for a while if another app is still holding it.
+let camRetry = null;
+function retryCameraSoon() {
+  if (camRetry) return;
+  let tries = 0;
+  camRetry = setInterval(() => {
+    tries++;
+    if ((currentStream && currentStream.active) || tries > 20) { clearInterval(camRetry); camRetry = null; return; }
+    startWebcam($("camera-select").value || undefined);
+  }, 3000);
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    if (guideOn) setGuide(false, true);
+    if (currentStream) { currentStream.getTracks().forEach(t => t.stop()); currentStream = null; }
+    $("cam-dot").classList.remove("live"); $("cam-status").innerText = "Camera paused";
+  } else {
+    startWebcam($("camera-select").value || undefined);
+  }
+});
+$("cam-pill").addEventListener("click", () => startWebcam($("camera-select").value || undefined));
+
+// ---------------- Start ("put on the glasses") ----------------
+// Browsers only allow sound after a tap, so the glasses start with one tap.
+function startGlasses() {
+  if (started) return;
+  started = true;
+  $("start-overlay").remove();
+  initializeRecognition();
+  prepareMicrophone();
+  speak(lang() === "ar" ? "النظارة جاهزة. قول أمر، أو قول مساعدة." : "Smart glasses ready. Say a command, or say help.");
+}
+$("start-overlay").addEventListener("click", startGlasses);
+window.addEventListener("load", () => startWebcam());
+
+// exposed for automated tests
+window.__glasses = { handleVoiceCommand, run, guidedEnroll, setGuide, state: () => ({ busy, enrolling, guideOn, speaking, lastResult }) };
 </script>
 {% endblock %}

@@ -1,0 +1,20 @@
+# Private: photos of enrolled people, camera frames, plate photos and logs never leave this computer
+faces/
+uploads/
+training/plates_new/
+run_log*.txt
+setup_log.txt
+cctv_log_*.csv
+working_time_*.csv
+
+# Local environment and caches
+.venv/
+__pycache__/
+*.pyc
+
+# Training work folders (big, can be rebuilt)
+training/datasets/
+training/runs/
+training/plate_chars_work/
+training/training_log.txt
+runs/
