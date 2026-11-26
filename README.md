@@ -153,4 +153,4 @@ tests/                       52 unit + API tests (pytest)
 - **Read text / Summarise fix on Windows**: the Tesseract language folder is now set with `TESSDATA_PREFIX` (the old `--tessdata-dir` flag kept its quotes on Windows and failed).
 
 ## Related project
-The CCTV and security work that started here (face lists, alarms, plate reading, working time) moved to a separate private product, **Raqib (رقيب)**.
+The CCTV and security work that started here (face lists, alarms, Egyptian plate reading, working time) became a separate project: [**Raqib (رقيب)**](https://github.com/Ahmed-Yasser-V0/Raqib).
