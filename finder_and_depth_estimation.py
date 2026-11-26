@@ -1,142 +1,145 @@
-import cv2
-import math
-from ultralytics import YOLO
+# ------------------------------
+# Find Object + Distance
+# ------------------------------
+# "find bottle" -> "The bottle is at 1 o'clock, about 1 meter away."
+#
+# Fixes vs. the original version:
+#  * The size table used old class names (tvmonitor, sofa, pottedplant...) that
+#    YOLOv8 doesn't use, so finding a TV / couch / plant / table crashed.
+#  * Words are normalised: "Bottle", "bottles", "the bottle", "a phone",
+#    Arabic ("إزازة", "موبايل") all work.
+#  * The most confident match is used (not just the first box).
+#  * Distance is calibrated from the camera's field of view and given in metres.
+# ------------------------------
+import re
 
-model = YOLO("yolov8m.pt")
+from core import i18n
+from core.models import object_model, open_vocab_model
+from detection_function import _load, run_yolo
 
+FIND_CONF = 0.30
 
-# Dictionary mapping class names to object widths
-object_data = {
-    "person": {"width": 100, "real_width": 170},
-    "bicycle": {"width": 150, "real_width": 190},
-    "car": {"width": 200, "real_width": 400},
-    "motorbike": {"width": 150, "real_width": 220},
-    "aeroplane": {"width": 300, "real_width": 1500},
-    "bus": {"width": 400, "real_width": 1200},
-    "train": {"width": 600, "real_width": 6000},
-    "truck": {"width": 400, "real_width": 2400},
-    "boat": {"width": 250, "real_width": 500},
-    "traffic light": {"width": 50, "real_width": 80},
-    "fire hydrant": {"width": 50, "real_width": 100},
-    "stop sign": {"width": 50, "real_width": 75},
-    "parking meter": {"width": 20, "real_width": 50},
-    "bench": {"width": 150, "real_width": 200},
-    "bird": {"width": 30, "real_width": 30},
-    "cat": {"width": 50, "real_width": 45},
-    "dog": {"width": 70, "real_width": 60},
-    "horse": {"width": 150, "real_width": 210},
-    "sheep": {"width": 100, "real_width": 110},
-    "cow": {"width": 200, "real_width": 220},
-    "elephant": {"width": 300, "real_width": 330},
-    "bear": {"width": 200, "real_width": 280},
-    "zebra": {"width": 200, "real_width": 250},
-    "giraffe": {"width": 300, "real_width": 600},
-    "backpack": {"width": 50, "real_width": 30},
-    "umbrella": {"width": 50, "real_width": 70},
-    "handbag": {"width": 30, "real_width": 25},
-    "tie": {"width": 50, "real_width": 35},
-    "suitcase": {"width": 100, "real_width": 40},
-    "frisbee": {"width": 50, "real_width": 20},
-    "skis": {"width": 150, "real_width": 200},
-    "snowboard": {"width": 150, "real_width": 160},
-    "sports ball": {"width": 50, "real_width": 20},
-    "kite": {"width": 100, "real_width": 100},
-    "baseball bat": {"width": 50, "real_width": 90},
-    "baseball glove": {"width": 50, "real_width": 30},
-    "skateboard": {"width": 100, "real_width": 80},
-    "surfboard": {"width": 150, "real_width": 220},
-    "tennis racket": {"width": 50, "real_width": 70},
-    "bottle": {"width": 35, "real_width": 16.75},
-    "wine glass": {"width": 30, "real_width": 8},
-    "cup": {"width": 30, "real_width": 9},
-    "fork": {"width": 20, "real_width": 18},
-    "knife": {"width": 20, "real_width": 20},
-    "spoon": {"width": 20, "real_width": 17},
-    "bowl": {"width": 100, "real_width": 110},
-    "banana": {"width": 30, "real_width": 15},
-    "apple": {"width": 30, "real_width": 8},
-    "sandwich": {"width": 100, "real_width": 15},
-    "orange": {"width": 30, "real_width": 8},
-    "broccoli": {"width": 30, "real_width": 10},
-    "carrot": {"width": 20, "real_width": 15},
-    "hot dog": {"width": 50, "real_width": 10},
-    "pizza": {"width": 100, "real_width": 25},
-    "donut": {"width": 30, "real_width": 8},
-    "cake": {"width": 100, "real_width": 10},
-    "chair": {"width": 100, "real_width": 50},
-    "sofa": {"width": 200, "real_width": 180},
-    "pottedplant": {"width": 30, "real_width": 20},
-    "bed": {"width": 200, "real_width": 200},
-    "diningtable": {"width": 200, "real_width": 100},
-    "toilet": {"width": 70, "real_width": 40},
-    "tvmonitor": {"width": 100, "real_width": 60},
-    "laptop": {"width": 50, "real_width": 35},
-    "mouse": {"width": 20, "real_width": 10},
-    "remote": {"width": 30, "real_width": 15},
-    "keyboard": {"width": 30.75, "real_width": 2.65},
-    "cell phone": {"width": 15, "real_width": 3.9},
-    "microwave": {"width": 50, "real_width": 50},
-    "oven": {"width": 70, "real_width": 70},
-    "toaster": {"width": 40, "real_width": 40},
-    "sink": {"width": 50, "real_width": 50},
-    "refrigerator": {"width": 100, "real_width": 100},
-    "book": {"width": 14, "real_width": 1.69},
-    "clock": {"width": 30, "real_width": 20},
-    "vase": {"width": 30, "real_width": 20},
-    "scissors": {"width": 20, "real_width": 20},
-    "teddy bear": {"width": 50, "real_width": 30},
-    "hair drier": {"width": 20, "real_width": 20},
-    "toothbrush": {"width": 10, "real_width": 10}
+# Extra words people say -> YOLO class name
+SYNONYMS = {
+    "phone": "cell phone", "mobile": "cell phone", "mobile phone": "cell phone", "iphone": "cell phone",
+    "smartphone": "cell phone", "telephone": "cell phone", "sofa": "couch", "television": "tv",
+    "tv monitor": "tv", "screen": "tv", "monitor": "tv", "plant": "potted plant", "flower": "potted plant",
+    "table": "dining table", "desk": "dining table", "bike": "bicycle", "motorbike": "motorcycle",
+    "aeroplane": "airplane", "plane": "airplane", "glass": "wine glass", "mug": "cup", "bag": "handbag",
+    "purse": "handbag", "ball": "sports ball", "man": "person", "woman": "person", "someone": "person",
+    "somebody": "person", "people": "person", "kid": "person", "child": "person", "fridge": "refrigerator",
+    "computer": "laptop", "notebook": "laptop", "kitten": "cat", "puppy": "dog", "doughnut": "donut",
+    "hairdryer": "hair drier", "hair dryer": "hair drier", "controller": "remote", "suitcase": "suitcase",
+    "luggage": "suitcase", "water": "bottle", "water bottle": "bottle",
+    # Arabic (Egyptian + standard)
+    "موبايل": "cell phone", "تليفون": "cell phone", "فون": "cell phone", "هاتف": "cell phone", "جوال": "cell phone",
+    "ازازة": "bottle", "ازازه": "bottle", "إزازة": "bottle", "قزازة": "bottle", "زجاجة": "bottle", "زجاجه": "bottle", "مياه": "bottle",
+    "كوباية": "cup", "كوبايه": "cup", "كوب": "cup", "مج": "cup", "فنجان": "cup",
+    "كرسي": "chair", "كرسى": "chair", "كنبة": "couch", "كنبه": "couch", "ترابيزة": "dining table", "ترابيزه": "dining table",
+    "طاولة": "dining table", "مكتب": "dining table", "لابتوب": "laptop", "لاب": "laptop", "كمبيوتر": "laptop",
+    "شنطة": "handbag", "شنطه": "handbag", "شنطة ضهر": "backpack", "كتاب": "book", "ساعة": "clock", "ساعه": "clock",
+    "تلفزيون": "tv", "شاشة": "tv", "شاشه": "tv", "ريموت": "remote", "كيبورد": "keyboard", "ماوس": "mouse",
+    "مقص": "scissors", "شخص": "person", "حد": "person", "راجل": "person", "ست": "person", "عربية": "car", "عربيه": "car",
+    "سيارة": "car", "عجلة": "bicycle", "قطة": "cat", "قطه": "cat", "كلب": "dog", "زرعة": "potted plant", "زرعه": "potted plant",
+    "سرير": "bed", "تلاجة": "refrigerator", "تلاجه": "refrigerator", "شمسية": "umbrella", "كورة": "sports ball", "كوره": "sports ball",
+    "طبق": "bowl", "معلقة": "spoon", "معلقه": "spoon", "شوكة": "fork", "سكينة": "knife", "سكينه": "knife",
+    "تفاحة": "apple", "موزة": "banana", "برتقانة": "orange", "فرشة": "toothbrush", "سشوار": "hair drier",
 }
+# Words for the open-vocabulary model (things YOLO's 80 classes don't have)
+OPEN_SYNONYMS = {
+    "key": "keys", "my keys": "keys", "eyeglasses": "glasses", "spectacles": "glasses", "shades": "sunglasses",
+    "purse wallet": "wallet", "money": "banknote", "cash": "banknote", "pills": "medicine", "tablets": "medicine",
+    "medication": "medicine", "staircase": "stairs", "steps": "stairs", "stair": "stairs", "lift": "elevator",
+    "socket": "power outlet", "plug": "power outlet", "outlet": "power outlet", "switch": "light switch",
+    "handle": "door handle", "tap": "faucet", "bin": "trash can", "garbage": "trash can", "rubbish bin": "trash can",
+    "shoe": "shoes", "slipper": "slippers", "headset": "headphones", "earbuds": "earphones", "card": "credit card",
+    "tissues": "tissue box", "walking stick": "cane", "stick": "cane",
+    "مفتاح": "keys", "مفاتيح": "keys", "المفاتيح": "keys", "نضارة": "glasses", "نضاره": "glasses", "نظارة": "glasses",
+    "نظاره": "glasses", "محفظة": "wallet", "محفظه": "wallet", "قلم": "pen", "دوا": "medicine", "دواء": "medicine",
+    "برشام": "medicine", "علبة الدوا": "pill bottle", "شاحن": "charger", "سماعة": "headphones", "سماعه": "headphones",
+    "باب": "door", "الباب": "door", "سلم": "stairs", "السلم": "stairs", "سلالم": "stairs", "أسانسير": "elevator",
+    "اسانسير": "elevator", "شباك": "window", "فيشة": "power outlet", "فيشه": "power outlet", "مفتاح النور": "light switch",
+    "اوكرة": "door handle", "أوكرة": "door handle", "حنفية": "faucet", "فوطة": "towel", "مخدة": "pillow",
+    "جزمة": "shoes", "جزمه": "shoes", "شبشب": "slippers", "طاقية": "hat", "كاب": "hat", "مراية": "mirror", "مرايه": "mirror",
+    "مشط": "comb", "صابون": "soap", "مناديل": "tissue box", "طفاية": "fire extinguisher", "مروحة": "fan", "كارت": "credit card",
+    "سلة": "trash can", "زبالة": "trash can", "ساعة ايد": "watch", "خاتم": "ring", "عصاية": "cane", "كاتل": "kettle",
+}
+OPEN_CONF = 0.30
 
-def find(image_path, object_to_be_found):
-    # return if the object is none
-    if object_to_be_found == None:
-        return "Nothing to detect!"
-    
-    # read the image and make detection
-    img = cv2.imread(image_path)
-    results = model.predict(img, save=True)
-    founded = False
+STOP_WORDS = {"the", "a", "an", "my", "me", "for", "find", "where", "is", "are", "please", "look",
+              "عن", "على", "فين", "ال", "دور", "ابحث", "لي", "ليا"}
 
-    # Define the boundaries of the three parts
-    image_width = img.shape[1]
-    left_boundary = image_width // 3
-    right_boundary = 2 * left_boundary
 
-    # loop through the model results
-    for r in results:
-        boxes = r.boxes
-        if boxes:
-            for box in boxes:
-                class_index = int(box.cls[0])
-                class_name = model.names[class_index]
-                if class_name == object_to_be_found or (class_name == "cell phone" and object_to_be_found == "phone"):
-                    x1, y1, x2, y2 = box.xyxy[0]
-                    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-                    w, h = x2 - x1, y2 - y1
-                    conf = math.ceil((box.conf[0] * 100)) / 100
-                    
-                    # Calculate distance based on object data
-                    obj_width = object_data[class_name]["width"]
-                    focal_length = 46
-                    real_width = object_data[class_name]["real_width"]
-                    apparent_width = w
-                    distance = round(((((obj_width * focal_length) / apparent_width * (real_width / obj_width)) + 35)) / 30.48)
+def normalise(query):
+    """Turn what the user said/typed into a YOLO class name (or None).
+    Returns names from YOLO's 80 classes first, then from the open vocabulary."""
+    if not query:
+        return None
+    names = set(object_model().names.values())
+    ov = open_vocab_model()
+    open_names = set(ov.names.values()) if ov is not None else set()
+    q = re.sub(r"[^\w\s]", " ", str(query).lower(), flags=re.UNICODE)
+    words = [w for w in q.split() if w not in STOP_WORDS]
+    if not words:
+        return None
+    candidates = [" ".join(words)] + [" ".join(words[i:i + 2]) for i in range(len(words) - 1)] + words
+    for c in candidates:
+        for form in (c, c[2:] if c.startswith("ال") else c, c.rstrip("s"), c[:-2] if c.endswith("es") else c):
+            if form in names:
+                return form
+            if form in SYNONYMS:
+                return SYNONYMS[form]
+            if form in OPEN_SYNONYMS and OPEN_SYNONYMS[form] in open_names:
+                return OPEN_SYNONYMS[form]
+            if form in open_names:
+                return form
+            if form + "s" in open_names:          # "key" -> "keys"
+                return form + "s"
+    return None
 
-                    # Check which part the object belongs to
-                    if x2 < left_boundary:
-                        part = "to your left"
-                    elif x1 > right_boundary:
-                        part = "to your right"
-                    else:
-                        part = "in front of you"
 
-                    return "The " + class_name + " is " + str(distance) + " feet " + part
-            if founded == False:
-                return object_to_be_found + " is not found!"
-        else:
-            return "Nothing To Be Found!"
+def find_object(frame, query, lang="en"):
+    """Returns (spoken_text, detections)."""
+    if not query or not str(query).strip():
+        return i18n.msg("what_to_find", lang), []
+    target = normalise(query)
+    if target is None:
+        if i18n.is_ar(lang):
+            return f"معرفش أدور على \"{query}\". أقدر ألاقي حاجات زي الكرسي والإزازة والموبايل.", []
+        return f"I can't look for \"{query}\" yet. I can find things like a chair, a bottle or a phone.", []
+
+    image = _load(frame)
+    if image is None:
+        return i18n.msg("no_image", lang), []
+    coco = set(object_model().names.values())
+    if target in coco:
+        matches = [d for d in run_yolo(image, object_model(), FIND_CONF) if d["label"] == target]
+    else:
+        matches = [d for d in run_yolo(image, open_vocab_model(), OPEN_CONF) if d["label"] == target]
+    name = i18n.object_name(target, 1, lang)
+    if not matches:
+        if i18n.is_ar(lang):
+            return f"مش لاقي {name}.", []
+        return f"I can't find the {name}.", []
+
+    best = max(matches, key=lambda d: d["confidence"])
+    best["kind"] = "object"
+    best["name"] = name
+    if i18n.is_ar(lang):
+        text = f"لقيت {name} {i18n.where(best, lang)}."
+        if len(matches) > 1:
+            text += f" وفيه {i18n.num(len(matches), lang)} في الصورة."
+    else:
+        text = f"The {name} is {i18n.where(best, lang)}."
+        if len(matches) > 1:
+            text += f" I see {i18n.num(len(matches), lang)} of them; this is the clearest one."
+    return text, [best]
+
+
+# --- kept for backwards compatibility with the original project ---
+def find(image_path, object_to_be_found, lang="en"):
+    return find_object(image_path, object_to_be_found, lang)[0]
+
 
 def test_find():
-    print(find("static/logo.png", "cat"))
+    find_object("static/logo.png", "cat")

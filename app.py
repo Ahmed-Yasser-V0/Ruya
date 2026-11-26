@@ -1,127 +1,260 @@
 # ---------------------------------------
-# Import Libraries ----------------------
+# Smart Glasses - Flask server
+# ---------------------------------------
+# Routes
+#   GET  /               the web interface
+#   POST /detect         one-shot modes (object, find, currency, describe, text,
+#                        summarize, face, add_face, forget_face, list_faces)
+#   POST /face/enroll    guided enrollment: several photos of one person at once
+#   POST /guide          Guide mode: one frame of the continuous stream
+#   POST /guide/reset    forget Guide mode's memory (when it is switched off)
+#   GET  /health         which modes are available on this machine
+#
+# Every answer is JSON: [{"result": text, "mode": ..., "detections": [...], "lang": ...}]
+# "detections" holds normalised boxes (0..1) that the page draws over the camera.
 # ---------------------------------------
 import os
 import shutil
 from datetime import datetime
-from flask import Flask, request, render_template, jsonify
-from werkzeug.utils import secure_filename
-from ultralytics import YOLO
-from waitress import serve
 
-from finder_and_depth_estimation import find, test_find
-from detection_function import *
-from describe_function_2 import generate_caption_from_image, test_describe
-from ocr_function import ocr_image_to_text, test_ocr
-from summarize_function import summarize_text, test_summarize
+import cv2
+import numpy as np
+from flask import Flask, jsonify, render_template, request
+
+from core import i18n
+from core.models import object_model, path
+
+import detection_function as detection
+import face_function as faces
+import finder_and_depth_estimation as finder
+import guide
+
+app = Flask(__name__, template_folder=path("templates"), static_folder=path("static"))
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024     # reject huge uploads
+MAX_IMAGE_BYTES = 16 * 1024 * 1024
+app.config["TEMPLATES_AUTO_RELOAD"] = True               # page edits apply on browser refresh
+UPLOAD_FOLDER = path("uploads")
+KEEP_UPLOADS = True     # keep today's frames for debugging (older days are deleted)
 
 # ---------------------------------------
-# Initialize Flask App and Model --------
+# Optional modes: if a library/model is missing on this device the app still
+# starts and that mode answers "not installed" instead of crashing everything.
 # ---------------------------------------
-app = Flask(__name__)
-UPLOAD_FOLDER = "uploads"
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-model = YOLO("yolov8m.pt")
+AVAILABLE = {}
+try:
+    from describe_function_2 import generate_caption_from_image, test_describe
+    AVAILABLE["describe"] = True
+except Exception as e:
+    print(f"⚠️  Description mode disabled: {e}")
+    generate_caption_from_image, test_describe = None, None
+try:
+    from ocr_function import NOTHING, ocr_image_to_text, test_ocr
+    AVAILABLE["text"] = True
+except Exception as e:
+    print(f"⚠️  Text (OCR) mode disabled: {e}")
+    ocr_image_to_text, test_ocr, NOTHING = None, None, "Nothing To Read"
+try:
+    from summarize_function import summarize_text, test_summarize
+    AVAILABLE["summarize"] = True
+except Exception as e:
+    print(f"⚠️  Summarize mode disabled: {e}")
+    summarize_text, test_summarize = None, None
+
 
 # ---------------------------------------
-# Test Program Functions ----------------
+# Start-up checks (also loads every model once, so the first request is fast)
 # ---------------------------------------
 def test_program_functions():
-    print("Testing the Description Mode ............")
-    test_describe()
-    print("Done ✔️")
-    print("Testing the OCR Text Mode ............")
-    test_ocr()
-    print("Done ✔️")
-    print("Testing the Summarize Text Mode ............")
-    test_summarize()
-    print("Done ✔️")
-    print("Testing the Finder Mode ............")
-    test_find()
-    print("Done ✔️")
-    print("Testing the Detection Mode ............")
-    test_detection()
-    print("Done ✔️")
+    tests = [
+        ("Detection Mode", detection.test_detection),
+        ("Finder Mode", finder.test_find),
+        ("Face Recognition Mode", faces.test_face),
+        ("Description Mode", test_describe),
+        ("OCR Text Mode", test_ocr),
+        ("Summarize Text Mode", test_summarize),
+    ]
+    for name, test in tests:
+        print(f"Testing the {name} ............")
+        if test is None:
+            print("Skipped (not installed) ⚠️")
+            continue
+        try:
+            test()
+            print("Done ✔️")
+        except Exception as e:
+            key = {"Description Mode": "describe", "OCR Text Mode": "text", "Summarize Text Mode": "summarize"}.get(name)
+            if key:
+                AVAILABLE[key] = False
+            print(f"Not working on this device ⚠️  ({e})")
     print("---------------------------------------------------")
     print("The Program Is Ready ✔️ ---------------------------")
+    print("Open http://localhost:5001 in Chrome")
     print("---------------------------------------------------")
 
-test_program_functions()
 
 # ---------------------------------------
-# Helper Functions ----------------------
+# Helpers
 # ---------------------------------------
-def save_file(file):
-    today_date = datetime.now().strftime('%Y-%m-%d')
-    today_folder_path = os.path.join(UPLOAD_FOLDER, today_date)
-    os.makedirs(today_folder_path, exist_ok=True)
+def read_image(file_storage):
+    data = np.frombuffer(file_storage.read(MAX_IMAGE_BYTES + 1), dtype=np.uint8)
+    if data.size > MAX_IMAGE_BYTES:      # photos stay limited; only CCTV accepts big files
+        return None
+    return cv2.imdecode(data, cv2.IMREAD_COLOR) if data.size else None
 
-    # Remove folders with names other than today's date
-    for folder in os.listdir(UPLOAD_FOLDER):
-        folder_path = os.path.join(UPLOAD_FOLDER, folder)
-        if os.path.isdir(folder_path) and folder != today_date:
-            shutil.rmtree(folder_path)
 
-    # Save the image with the current datetime
-    filename = secure_filename(file.filename)
-    filename = datetime.now().strftime('%Y-%m-%d_%H-%M-%S_') + filename
-    file_path = os.path.join(today_folder_path, filename)
-    file.save(file_path)
-    return os.path.join(today_folder_path, filename)
+def save_frame(image):
+    """Keep today's frames in uploads/<date>/ (older days are removed)."""
+    if not KEEP_UPLOADS:
+        return
+    today = datetime.now().strftime("%Y-%m-%d")
+    folder = os.path.join(UPLOAD_FOLDER, today)
+    os.makedirs(folder, exist_ok=True)
+    for old in os.listdir(UPLOAD_FOLDER):
+        old_path = os.path.join(UPLOAD_FOLDER, old)
+        if os.path.isdir(old_path) and old != today:
+            shutil.rmtree(old_path, ignore_errors=True)
+    cv2.imwrite(os.path.join(folder, datetime.now().strftime("%Y-%m-%d_%H-%M-%S_frame.jpg")), image)
 
-def process_detected_text(detected_text):
-    # Example: Clean up the text by removing extra spaces or unwanted characters
-    cleaned_text = " ".join(detected_text.split())
-    
-    # Example: Validate the text (e.g., check if it contains specific keywords)
-    if "important" in cleaned_text.lower():
-        return f"{cleaned_text} (validated as important)"
-    
-    # Example: Perform additional analysis or transformations
-    return cleaned_text
+
+def answer(text, mode, lang, detections=None, **extra):
+    payload = {"result": text, "mode": mode, "lang": lang, "detections": detections or []}
+    payload.update(extra)
+    return jsonify([payload])
+
+
+def not_installed(mode, lang):
+    return answer(i18n.msg("not_installed", lang), mode, lang)
+
 
 # ---------------------------------------
-# Routes --------------------------------
+# Routes
 # ---------------------------------------
-@app.route('/', methods=['GET'])
+@app.route("/", methods=["GET"])
 def index():
-    names = model.names
-    return render_template('index.html', names=names)
+    return render_template("index.html", names=object_model().names)
 
-@app.route('/detect', methods=['POST'])
+
+@app.route("/health")
+def health():
+    return jsonify({"ok": True, "modes": {"object": True, "find": True, "currency": True, "face": True,
+                                          "describe": AVAILABLE.get("describe", False),
+                                          "text": AVAILABLE.get("text", False),
+                                          "summarize": AVAILABLE.get("summarize", False)}})
+
+
+@app.route("/detect", methods=["POST"])
 def detect():
-    if 'image' not in request.files:
-        return jsonify([{'result': 'No image received', 'mode': 'object'}])
+    i18n.set_units(request.form.get("unit"), request.form.get("step_cm"))
+    mode = request.form.get("select_mode") or ""
+    lang = "ar" if i18n.is_ar(request.form.get("lang")) else "en"
+    if "image" not in request.files:
+        return answer(i18n.msg("no_image", lang), mode or "object", lang)
+    image = read_image(request.files["image"])
+    if image is None:
+        return answer(i18n.msg("no_image", lang), mode, lang)
+    save_frame(image)
 
-    f = request.files['image']
-    selected_option = request.form.get('select_mode')
-    object_to_be_found = request.form.get('object_to_be_found')
+    try:
+        if mode in ("object", "currency"):
+            text, dets = detection.detect(image, mode, lang)
+            return answer(text, mode, lang, dets)
+        if mode == "find":
+            text, dets = finder.find_object(image, request.form.get("object_to_be_found", ""), lang)
+            return answer(text, mode, lang, dets)
+        if mode == "face":
+            text, dets = faces.recognize(image, lang)
+            return answer(text, mode, lang, dets)
+        if mode == "add_face":
+            text, info = faces.enroll([image], request.form.get("person_name", ""), lang)
+            return answer(text, mode, lang, **info)
+        if mode == "forget_face":
+            return answer(faces.forget(request.form.get("person_name", ""), lang), mode, lang)
+        if mode == "list_faces":
+            return answer(faces.known_people_sentence(lang), mode, lang)
+        if mode == "describe":
+            if not AVAILABLE.get("describe"):
+                return not_installed(mode, lang)
+            caption = generate_caption_from_image(image) or ("مش قادر أوصف الصورة." if lang == "ar" else "I can't describe this scene.")
+            # BLIP writes English; the page translates it when Arabic is selected
+            return answer(caption, mode, lang, translate=(lang == "ar"))
+        if mode == "text":
+            if not AVAILABLE.get("text"):
+                return not_installed(mode, lang)
+            text = ocr_image_to_text(image, lang)
+            return answer(i18n.msg("no_text", lang) if text == NOTHING else " ".join(text.split()), mode, lang)
+        if mode == "summarize":
+            if not AVAILABLE.get("summarize"):
+                return not_installed(mode, lang)
+            text = summarize_text(image, lang)
+            if text == "Nothing To Summarize":
+                return answer(i18n.msg("no_summary", lang), mode, lang)
+            short = text.startswith("الكلام قصير")
+            return answer(text, mode, lang, translate=(lang == "ar" and not short))
+        return answer(i18n.msg("choose_mode", lang), mode, lang)
+    except Exception as e:
+        print(f"⚠️  Error in mode '{mode}': {e}")
+        return answer(i18n.msg("mode_error", lang), mode, lang)
 
-    file_path = save_file(f)
 
-    # Process using selected mode
-    if selected_option == "currency":
-        result = image_detection(file_path, "currency")
-    elif selected_option == "describe":
-        result = generate_caption_from_image(file_path)
-    elif selected_option == "text":
-        # Detect text and process it
-        detected_text = ocr_image_to_text(file_path)
-        processed_text = process_detected_text(detected_text)  # Additional processing logic
-        result = f"{processed_text}"
-    elif selected_option == "summarize":
-        result = summarize_text(file_path)
-    elif selected_option == "find":
-        result = find(file_path, object_to_be_found)
-    elif selected_option == "object":
-        result = image_detection(file_path, "object")
+@app.route("/face/enroll", methods=["POST"])
+def face_enroll():
+    i18n.set_units(request.form.get("unit"), request.form.get("step_cm"))
+    lang = "ar" if i18n.is_ar(request.form.get("lang")) else "en"
+    images = [img for img in (read_image(f) for f in request.files.getlist("images")) if img is not None]
+    if not images:
+        return answer(i18n.msg("no_image", lang), "add_face", lang)
+    try:
+        text, info = faces.enroll(images, request.form.get("person_name", ""), lang)
+        return answer(text, "add_face", lang, **info)
+    except Exception as e:
+        print(f"⚠️  Error in enrollment: {e}")
+        return answer(i18n.msg("mode_error", lang), "add_face", lang)
 
-    return jsonify([{'result': result, 'mode': selected_option}])
+
+@app.route("/guide", methods=["POST"])
+def guide_step():
+    i18n.set_units(request.form.get("unit"), request.form.get("step_cm"))
+    lang = "ar" if i18n.is_ar(request.form.get("lang")) else "en"
+    if "image" not in request.files:
+        return jsonify({"events": [], "detections": []})
+    image = read_image(request.files["image"])
+    if image is None:
+        return jsonify({"events": [], "detections": []})
+    try:
+        events, dets = guide.get_session(request.form.get("session", "default")).step(image, lang)
+        return jsonify({"events": events, "detections": dets})
+    except Exception as e:
+        print(f"⚠️  Error in guide mode: {e}")
+        return jsonify({"events": [], "detections": [], "error": True})
+
+
+@app.route("/guide/reset", methods=["POST"])
+def guide_reset():
+    guide.reset_session(request.form.get("session", "default"))
+    return jsonify({"ok": True})
+
 
 # ---------------------------------------
-# Run The App ---------------------------
+# Run The App
 # ---------------------------------------
-if __name__ == '__main__':
-    host = '0.0.0.0'
-    port = 5001
-    app.run(host=host, port=port, debug=True)
+if __name__ == "__main__":
+    test_program_functions()
+    host, port = "0.0.0.0", 5001
+
+    # Windows + Python 3.14: looking up this computer's network name can crash
+    # ("idna codec ... BIDI requirement"). The name isn't needed, so fall back safely.
+    import socket
+    _original_getfqdn = socket.getfqdn
+
+    def _safe_getfqdn(name=""):
+        try:
+            return _original_getfqdn(name)
+        except Exception:
+            return name or "localhost"
+    socket.getfqdn = _safe_getfqdn
+
+    import threading
+    import webbrowser
+    threading.Timer(2, lambda: webbrowser.open(f"http://localhost:{port}")).start()
+    # debug=False: the Werkzeug debugger must never be reachable from the network
+    app.run(host=host, port=port, debug=False, threaded=True, use_reloader=False)
